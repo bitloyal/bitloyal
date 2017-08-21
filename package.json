@@ -1,23 +1,26 @@
 {
-  "name": "bcoin",
+  "name": "ioncoin",
   "version": "1.0.0-beta.14",
-  "description": "Bitcoin bike-shed",
+  "description": "ION bike-shed",
   "license": "MIT",
-  "repository": "git://github.com/bcoin-org/bcoin.git",
-  "homepage": "https://github.com/bcoin-org/bcoin",
+  "repository": "git://github.com/rdewilde/ioncoin.git",
+  "homepage": "https://github.com/rdewilde/ioncoin",
   "bugs": {
-    "url": "https://github.com/bcoin-org/bcoin/issues"
+    "url": "https://github.com/rdewilde/ioncoin/issues"
   },
-  "author": "Fedor Indutny <fedor@indutny.com>",
+  "author": "Robert de Wilde <email@robertdewilde.nl>",
   "contributors": [
-    "Christopher Jeffrey <chjjeffrey@gmail.com>"
+    "Christopher Jeffrey <chjjeffrey@gmail.com>",
+    "Fedor Indutny <fedor@indutny.com>"
   ],
   "keywords": [
     "bcoin",
     "bitcoin",
     "blockchain",
     "cryptocurrency",
-    "wallet"
+    "wallet",
+    "ion",
+    "ioncoin"
   ],
   "engines": {
     "node": ">=7.6.0"
@@ -28,7 +31,7 @@
     "n64": "0.0.12"
   },
   "optionalDependencies": {
-    "bcoin-native": "0.0.23",
+    "bcoin-native": "git+https://github.com/rdewilde/ioncoin-native.git",
     "leveldown": "1.7.2",
     "secp256k1": "3.2.5",
     "socket.io": "2.0.1",
@@ -63,11 +66,9 @@
     "lint": "eslint $(cat .eslintfiles) || exit 0",
     "lint-file": "eslint",
     "test": "mocha --reporter spec test/*.js",
-    "test-browser":
-      "BCOIN_NO_NATIVE=1 BCOIN_NO_SECP256K1=1 mocha --reporter spec test/*.js",
+    "test-browser": "BCOIN_NO_NATIVE=1 BCOIN_NO_SECP256K1=1 mocha --reporter spec test/*.js",
     "test-file": "mocha --reporter spec",
-    "test-file-browser":
-      "BCOIN_NO_NATIVE=1 BCOIN_NO_SECP256K1=1 mocha --reporter spec",
+    "test-file-browser": "BCOIN_NO_NATIVE=1 BCOIN_NO_SECP256K1=1 mocha --reporter spec",
     "webpack": "webpack --config webpack.browser.js",
     "webpack-browser": "webpack --config webpack.browser.js",
     "webpack-compat": "webpack --config webpack.compat.js",
