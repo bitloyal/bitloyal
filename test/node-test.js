@@ -3,12 +3,12 @@
 
 'use strict';
 
-const assert = require('assert');
-const BN = require('../lib/crypto/bn');
+const assert = require('./util/assert');
 const consensus = require('../lib/protocol/consensus');
 const co = require('../lib/utils/co');
 const Coin = require('../lib/primitives/coin');
 const Script = require('../lib/script/script');
+const Opcode = require('../lib/script/opcode');
 const FullNode = require('../lib/node/fullnode');
 const MTX = require('../lib/primitives/mtx');
 const TX = require('../lib/primitives/tx');
@@ -63,8 +63,8 @@ async function mineCSV(fund) {
 
   spend.addOutput({
     script: [
-      Script.array(new BN(1)),
-      Script.opcodes.OP_CHECKSEQUENCEVERIFY
+      Opcode.fromInt(1),
+      Opcode.fromSymbol('checksequenceverify')
     ],
     value: 10 * 1e8
   });
@@ -117,13 +117,13 @@ describe('Node', function() {
 
       assert.strictEqual(chain.tip.hash, block1.hash('hex'));
 
-      tip1 = await chain.db.getEntry(block1.hash('hex'));
-      tip2 = await chain.db.getEntry(block2.hash('hex'));
+      tip1 = await chain.getEntry(block1.hash('hex'));
+      tip2 = await chain.getEntry(block2.hash('hex'));
 
       assert(tip1);
       assert(tip2);
 
-      assert(!await tip2.isMainChain());
+      assert(!await chain.isMainChain(tip2));
 
       await co.wait();
     }
@@ -147,7 +147,7 @@ describe('Node', function() {
     assert.strictEqual(wdb.state.height, chain.height);
     assert.strictEqual(chain.height, 11);
 
-    const entry = await chain.db.getEntry(tip2.hash);
+    const entry = await chain.getEntry(tip2.hash);
     assert(entry);
     assert.strictEqual(chain.height, entry.height);
 
@@ -163,7 +163,7 @@ describe('Node', function() {
 
     assert(forked);
     assert.strictEqual(chain.tip.hash, block.hash('hex'));
-    assert(chain.tip.chainwork.cmp(tip1.chainwork) > 0);
+    assert(chain.tip.chainwork.gt(tip1.chainwork));
   });
 
   it('should have correct chain value', () => {
@@ -181,7 +181,7 @@ describe('Node', function() {
   });
 
   it('should check main chain', async () => {
-    const result = await tip1.isMainChain();
+    const result = await chain.isMainChain(tip1);
     assert(!result);
   });
 
@@ -190,11 +190,11 @@ describe('Node', function() {
 
     await chain.add(block);
 
-    const entry = await chain.db.getEntry(block.hash('hex'));
+    const entry = await chain.getEntry(block.hash('hex'));
     assert(entry);
     assert.strictEqual(chain.tip.hash, entry.hash);
 
-    const result = await entry.isMainChain();
+    const result = await chain.isMainChain(entry);
     assert(result);
   });
 
@@ -246,9 +246,9 @@ describe('Node', function() {
     const tx = block2.txs[1];
     const output = Coin.fromTX(tx, 1, chain.height);
 
-    const coin = await chain.db.getCoin(tx.hash('hex'), 1);
+    const coin = await chain.getCoin(tx.hash('hex'), 1);
 
-    assert.deepStrictEqual(coin.toRaw(), output.toRaw());
+    assert.bufferEqual(coin.toRaw(), output.toRaw());
   });
 
   it('should get balance', async () => {
@@ -288,7 +288,7 @@ describe('Node', function() {
   it('should rescan for transactions', async () => {
     let total = 0;
 
-    await chain.db.scan(0, wdb.filter, async (block, txs) => {
+    await chain.scan(0, wdb.filter, async (block, txs) => {
       total += txs.length;
     });
 
@@ -298,7 +298,7 @@ describe('Node', function() {
   it('should activate csv', async () => {
     const deployments = chain.network.deployments;
 
-    const prev = await chain.tip.getPrevious();
+    const prev = await chain.getPrevious(chain.tip);
     const state = await chain.getState(prev, deployments.csv);
     assert.strictEqual(state, 0);
 
@@ -307,19 +307,19 @@ describe('Node', function() {
       await chain.add(block);
       switch (chain.height) {
         case 144: {
-          const prev = await chain.tip.getPrevious();
+          const prev = await chain.getPrevious(chain.tip);
           const state = await chain.getState(prev, deployments.csv);
           assert.strictEqual(state, 1);
           break;
         }
         case 288: {
-          const prev = await chain.tip.getPrevious();
+          const prev = await chain.getPrevious(chain.tip);
           const state = await chain.getState(prev, deployments.csv);
           assert.strictEqual(state, 2);
           break;
         }
         case 432: {
-          const prev = await chain.tip.getPrevious();
+          const prev = await chain.getPrevious(chain.tip);
           const state = await chain.getState(prev, deployments.csv);
           assert.strictEqual(state, 3);
           break;
@@ -337,7 +337,7 @@ describe('Node', function() {
   });
 
   it('should test csv', async () => {
-    const tx = (await chain.db.getBlock(chain.height)).txs[0];
+    const tx = (await chain.getBlock(chain.height)).txs[0];
     const csvBlock = await mineCSV(tx);
 
     await chain.add(csvBlock);
@@ -348,8 +348,8 @@ describe('Node', function() {
 
     spend.addOutput({
       script: [
-        Script.array(new BN(2)),
-        Script.opcodes.OP_CHECKSEQUENCEVERIFY
+        Opcode.fromInt(2),
+        Opcode.fromSymbol('checksequenceverify')
       ],
       value: 10 * 1e8
     });
@@ -368,13 +368,13 @@ describe('Node', function() {
   });
 
   it('should fail csv with bad sequence', async () => {
-    const csv = (await chain.db.getBlock(chain.height)).txs[1];
+    const csv = (await chain.getBlock(chain.height)).txs[1];
     const spend = new MTX();
 
     spend.addOutput({
       script: [
-        Script.array(new BN(1)),
-        Script.opcodes.OP_CHECKSEQUENCEVERIFY
+        Opcode.fromInt(1),
+        Opcode.fromSymbol('checksequenceverify')
       ],
       value: 10 * 1e8
     });
@@ -407,7 +407,7 @@ describe('Node', function() {
   });
 
   it('should fail csv lock checks', async () => {
-    const tx = (await chain.db.getBlock(chain.height)).txs[0];
+    const tx = (await chain.getBlock(chain.height)).txs[0];
     const csvBlock = await mineCSV(tx);
 
     await chain.add(csvBlock);
@@ -418,8 +418,8 @@ describe('Node', function() {
 
     spend.addOutput({
       script: [
-        Script.array(new BN(2)),
-        Script.opcodes.OP_CHECKSEQUENCEVERIFY
+        Opcode.fromInt(2),
+        Opcode.fromSymbol('checksequenceverify')
       ],
       value: 10 * 1e8
     });
@@ -471,10 +471,11 @@ describe('Node', function() {
       id: '1'
     }, {});
 
-    assert.strictEqual(typeof json.result.curtime, 'number');
-    assert.strictEqual(typeof json.result.mintime, 'number');
-    assert.strictEqual(typeof json.result.maxtime, 'number');
-    assert.strictEqual(typeof json.result.expires, 'number');
+    assert.typeOf(json.result, 'object');
+    assert.typeOf(json.result.curtime, 'number');
+    assert.typeOf(json.result.mintime, 'number');
+    assert.typeOf(json.result.maxtime, 'number');
+    assert.typeOf(json.result.expires, 'number');
 
     assert.deepStrictEqual(json, {
       result: {
@@ -584,7 +585,7 @@ describe('Node', function() {
     await wallet.db.addTX(tx);
 
     const missing = await node.mempool.addTX(tx);
-    assert(!missing || missing.length === 0);
+    assert(!missing);
 
     assert.strictEqual(node.mempool.map.size, 1);
 
@@ -609,7 +610,7 @@ describe('Node', function() {
     await wallet.db.addTX(tx);
 
     const missing = await node.mempool.addTX(tx);
-    assert(!missing || missing.length === 0);
+    assert(!missing);
 
     assert.strictEqual(node.mempool.map.size, 2);
 

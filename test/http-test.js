@@ -3,7 +3,7 @@
 
 'use strict';
 
-const assert = require('assert');
+const assert = require('./util/assert');
 const consensus = require('../lib/protocol/consensus');
 const encoding = require('../lib/utils/encoding');
 const co = require('../lib/utils/co');
@@ -20,6 +20,7 @@ const node = new FullNode({
   apiKey: 'foo',
   walletAuth: true,
   db: 'memory',
+  workers: true,
   plugins: [require('../lib/wallet/plugin')]
 });
 
@@ -50,17 +51,19 @@ describe('HTTP', function() {
     const info = await wallet.client.getInfo();
     assert.strictEqual(info.network, node.network.type);
     assert.strictEqual(info.version, pkg.version);
+    assert.typeOf(info.pool, 'object');
     assert.strictEqual(info.pool.agent, node.pool.options.agent);
-    assert.strictEqual(typeof info.chain, 'object');
+    assert.typeOf(info.chain, 'object');
     assert.strictEqual(info.chain.height, 0);
   });
 
   it('should get wallet info', async () => {
     const info = await wallet.getInfo();
     assert.strictEqual(info.id, 'test');
-    addr = info.account.receiveAddress;
-    assert.strictEqual(typeof addr, 'string');
-    addr = Address.fromString(addr);
+    assert.typeOf(info.account, 'object');
+    const str = info.account.receiveAddress;
+    assert.typeOf(str, 'string');
+    addr = Address.fromString(str);
   });
 
   it('should fill with funds', async () => {
@@ -99,7 +102,7 @@ describe('HTTP', function() {
     assert.strictEqual(balance.confirmed, 0);
     assert.strictEqual(balance.unconfirmed, 201840);
     assert(details);
-    assert.strictEqual(details.hash, tx.rhash());
+    assert.strictEqual(details.hash, tx.txid());
   });
 
   it('should get balance', async () => {

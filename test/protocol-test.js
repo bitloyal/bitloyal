@@ -4,7 +4,7 @@
 
 'use strict';
 
-const assert = require('assert');
+const assert = require('./util/assert');
 const Network = require('../lib/protocol/network');
 const util = require('../lib/utils/util');
 const NetAddress = require('../lib/primitives/netaddress');
@@ -15,8 +15,8 @@ const packets = require('../lib/net/packets');
 const common = require('./util/common');
 const network = Network.get('main');
 
-const tx8 = common.parseTX('data/tx8.hex');
-const tx9 = common.parseTX('data/tx9.hex');
+const tx8 = common.readTX('tx8');
+const tx9 = common.readTX('tx9');
 
 describe('Protocol', function() {
   const pkg = require('../lib/pkg');
@@ -28,15 +28,20 @@ describe('Protocol', function() {
     framer = new Framer();
   });
 
-  function packetTest(command, payload, test) {
-    it(`should encode/decode ${command}`, (cb) => {
-      const ver = Buffer.from(framer.packet(command, payload.toRaw()));
+  function packetTest(cmd, payload, test) {
+    it(`should encode/decode ${cmd}`, (cb) => {
       parser.once('packet', (packet) => {
-        assert.strictEqual(packet.cmd, command);
-        test(packet);
+        try {
+          assert.strictEqual(packet.cmd, cmd);
+          test(packet);
+        } catch (e) {
+          cb(e);
+          return;
+        }
         cb();
       });
-      parser.feed(ver);
+      const raw = framer.packet(cmd, payload.toRaw());
+      parser.feed(raw);
     });
   }
 
@@ -97,26 +102,28 @@ describe('Protocol', function() {
   ];
 
   packetTest('addr', new packets.AddrPacket(hosts), (payload) => {
-    assert.strictEqual(typeof payload.items.length, 'number');
+    assert.typeOf(payload.items, 'array');
     assert.strictEqual(payload.items.length, 2);
 
-    assert.strictEqual(typeof payload.items[0].time, 'number');
+    assert.typeOf(payload.items[0].time, 'number');
     assert.strictEqual(payload.items[0].services, 1);
     assert.strictEqual(payload.items[0].host, hosts[0].host);
     assert.strictEqual(payload.items[0].port, hosts[0].port);
 
-    assert.strictEqual(typeof payload.items[1].time, 'number');
+    assert.typeOf(payload.items[1].time, 'number');
     assert.strictEqual(payload.items[1].services, 1);
     assert.strictEqual(payload.items[1].host, hosts[1].host);
     assert.strictEqual(payload.items[1].port, hosts[1].port);
   });
 
   it('should include the raw data of only one transaction', () => {
-    const raw = Buffer.concat([tx8.tx.toRaw(), tx9.tx.toRaw()]);
+    const [tx1] = tx8.getTX();
+    const [tx2] = tx9.getTX();
+    const raw = Buffer.concat([tx1.toRaw(), tx2.toRaw()]);
 
     const tx = TX.fromRaw(raw);
     tx.refresh();
 
-    assert.deepStrictEqual(tx.toRaw(), tx8.tx.toRaw());
+    assert.bufferEqual(tx.toRaw(), tx1.toRaw());
   });
 });

@@ -3,7 +3,7 @@
 
 'use strict';
 
-const assert = require('assert');
+const assert = require('./util/assert');
 const secp256k1 = require('../lib/crypto/secp256k1');
 const BIP150 = require('../lib/net/bip150');
 const BIP151 = require('../lib/net/bip151');
@@ -66,49 +66,61 @@ describe('BIP150', function() {
 
   it('should encrypt payload from client to server', () => {
     const packet = client.packet('fake', payload());
+
     let emitted = false;
     server.once('packet', (cmd, body) => {
       emitted = true;
       assert.strictEqual(cmd, 'fake');
-      assert.strictEqual(body.toString('hex'), 'deadbeef');
+      assert.bufferEqual(body, payload());
     });
+
     server.feed(packet);
+
     assert(emitted);
   });
 
   it('should encrypt payload from server to client', () => {
     const packet = server.packet('fake', payload());
+
     let emitted = false;
     client.once('packet', (cmd, body) => {
       emitted = true;
       assert.strictEqual(cmd, 'fake');
-      assert.strictEqual(body.toString('hex'), 'deadbeef');
+      assert.bufferEqual(body, payload());
     });
+
     client.feed(packet);
+
     assert(emitted);
   });
 
   it('should encrypt payload from client to server (2)', () => {
     const packet = client.packet('fake', payload());
+
     let emitted = false;
     server.once('packet', (cmd, body) => {
       emitted = true;
       assert.strictEqual(cmd, 'fake');
-      assert.strictEqual(body.toString('hex'), 'deadbeef');
+      assert.bufferEqual(body, payload());
     });
+
     server.feed(packet);
+
     assert(emitted);
   });
 
   it('should encrypt payload from server to client (2)', () => {
     const packet = server.packet('fake', payload());
+
     let emitted = false;
     client.once('packet', (cmd, body) => {
       emitted = true;
       assert.strictEqual(cmd, 'fake');
-      assert.strictEqual(body.toString('hex'), 'deadbeef');
+      assert.bufferEqual(body, payload());
     });
+
     client.feed(packet);
+
     assert(emitted);
   });
 
@@ -141,69 +153,85 @@ describe('BIP150', function() {
 
   it('should encrypt payload from client to server after rekey', () => {
     const packet = client.packet('fake', payload());
+
     let emitted = false;
     server.once('packet', (cmd, body) => {
       emitted = true;
       assert.strictEqual(cmd, 'fake');
-      assert.strictEqual(body.toString('hex'), 'deadbeef');
+      assert.bufferEqual(body, payload());
     });
+
     server.feed(packet);
+
     assert(emitted);
   });
 
   it('should encrypt payload from server to client after rekey', () => {
     const packet = server.packet('fake', payload());
+
     let emitted = false;
     client.once('packet', (cmd, body) => {
       emitted = true;
       assert.strictEqual(cmd, 'fake');
-      assert.strictEqual(body.toString('hex'), 'deadbeef');
+      assert.bufferEqual(body, payload());
     });
+
     client.feed(packet);
+
     assert(emitted);
   });
 
   it('should encrypt payload from client to server after rekey (2)', () => {
     const packet = client.packet('fake', payload());
+
     let emitted = false;
     server.once('packet', (cmd, body) => {
       emitted = true;
       assert.strictEqual(cmd, 'fake');
-      assert.strictEqual(body.toString('hex'), 'deadbeef');
+      assert.bufferEqual(body, payload());
     });
+
     server.feed(packet);
+
     assert(emitted);
   });
 
   it('should encrypt payload from server to client after rekey (2)', () => {
     const packet = server.packet('fake', payload());
+
     let emitted = false;
     client.once('packet', (cmd, body) => {
       emitted = true;
       assert.strictEqual(cmd, 'fake');
-      assert.strictEqual(body.toString('hex'), 'deadbeef');
+      assert.bufferEqual(body, payload());
     });
+
     client.feed(packet);
+
     assert(emitted);
   });
 
   it('should encrypt payloads both ways asynchronously', () => {
     const spacket = server.packet('fake', payload());
     const cpacket = client.packet('fake', payload());
+
     let cemitted = false;
-    let semitted = false;
     client.once('packet', (cmd, body) => {
       cemitted = true;
       assert.strictEqual(cmd, 'fake');
-      assert.strictEqual(body.toString('hex'), 'deadbeef');
+      assert.bufferEqual(body, payload());
     });
+
+    let semitted = false;
     server.once('packet', (cmd, body) => {
       semitted = true;
       assert.strictEqual(cmd, 'fake');
-      assert.strictEqual(body.toString('hex'), 'deadbeef');
+      assert.bufferEqual(body, payload());
     });
+
     client.feed(spacket);
     server.feed(cpacket);
+
     assert(cemitted);
     assert(semitted);
   });

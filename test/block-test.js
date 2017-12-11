@@ -3,12 +3,10 @@
 
 'use strict';
 
-const assert = require('assert');
-const fs = require('../lib/utils/fs');
+const assert = require('./util/assert');
 const common = require('./util/common');
 const Bloom = require('../lib/utils/bloom');
 const Block = require('../lib/primitives/block');
-const Headers = require('../lib/primitives/headers');
 const MerkleBlock = require('../lib/primitives/merkleblock');
 const consensus = require('../lib/protocol/consensus');
 const Script = require('../lib/script/script');
@@ -19,43 +17,45 @@ const TXRequest = bip152.TXRequest;
 const TXResponse = bip152.TXResponse;
 
 // Block test vectors
-const block300025 = fs.readFileSync(`${__dirname}/data/block300025.raw`);
-const undo300025 = fs.readFileSync(`${__dirname}/data/undo300025.raw`);
+const block300025 = common.readBlock('block300025');
 
 // Merkle block test vectors
-const merkle300025 = fs.readFileSync(`${__dirname}/data/merkle300025.raw`);
+const merkle300025 = common.readMerkle('merkle300025');
 
 // Compact block test vectors
-const block426884 = fs.readFileSync(`${__dirname}/data/block426884.raw`);
-const compact426884 = fs.readFileSync(`${__dirname}/data/compact426884.raw`);
-const block898352 = fs.readFileSync(`${__dirname}/data/block898352.raw`);
-const compact898352 = fs.readFileSync(`${__dirname}/data/compact898352.raw`);
+const block426884 = common.readBlock('block426884');
+const compact426884 = common.readCompact('compact426884');
+const block898352 = common.readBlock('block898352');
+const compact898352 = common.readCompact('compact898352');
 
 // Sigops counting test vectors
-const block928927 = fs.readFileSync(`${__dirname}/data/block928927.raw`);
-const undo928927 = fs.readFileSync(`${__dirname}/data/undo928927.raw`);
-const block928828 = fs.readFileSync(`${__dirname}/data/block928828.raw`);
-const undo928828 = fs.readFileSync(`${__dirname}/data/undo928828.raw`);
-const block1087400 = fs.readFileSync(`${__dirname}/data/block1087400.raw`);
-const undo1087400 = fs.readFileSync(`${__dirname}/data/undo1087400.raw`);
+// Format: [name, sigops, weight]
+const sigopsVectors = [
+  ['block928816', 9109, 3568200],
+  ['block928828', 23236, 2481560],
+  ['block928831', 10035, 3992382],
+  ['block928848', 11319, 3992537],
+  ['block928849', 9137, 3682105],
+  ['block928927', 10015, 3992391],
+  ['block1087400', 1298, 193331]
+];
 
 describe('Block', function() {
-  const mblock = MerkleBlock.fromRaw(merkle300025);
-  const block = Block.fromRaw(block300025);
-
   this.timeout(10000);
 
   it('should parse partial merkle tree', () => {
-    assert(mblock.verifyPOW());
-    assert(mblock.verifyBody());
-    assert(mblock.verify());
+    const [block] = merkle300025.getBlock();
 
-    const tree = mblock.getTree();
+    assert(block.verifyPOW());
+    assert(block.verifyBody());
+    assert(block.verify());
+
+    const tree = block.getTree();
 
     assert.strictEqual(tree.matches.length, 2);
-    assert.strictEqual(mblock.hash('hex'),
+    assert.strictEqual(block.hash('hex'),
       '8cc72c02a958de5a8b35a23bb7e3bced8bf840cc0a4e1c820000000000000000');
-    assert.strictEqual(mblock.rhash(),
+    assert.strictEqual(block.rhash(),
       '0000000000000000821c4e0acc40f88bedbce3b73ba2358b5ade58a9022cc78c');
     assert.strictEqual(
       tree.matches[0].toString('hex'),
@@ -66,55 +66,40 @@ describe('Block', function() {
   });
 
   it('should decode/encode merkle block', () => {
-    const merkle = MerkleBlock.fromRaw(merkle300025);
-    merkle.refresh();
-    assert.deepStrictEqual(merkle.toRaw(), merkle300025);
-    assert.deepStrictEqual(merkle300025, mblock.toRaw());
+    const [block] = merkle300025.getBlock();
+    block.refresh();
+    assert.bufferEqual(block.toRaw(), merkle300025.getRaw());
   });
 
-  it('should be verify merkle block', () => {
-    const merkle = MerkleBlock.fromRaw(merkle300025);
-    assert(merkle.verify());
+  it('should verify merkle block', () => {
+    const [block] = merkle300025.getBlock();
+    assert(block.verify());
   });
 
   it('should be encoded/decoded and still verify', () => {
-    const raw = mblock.toRaw();
-    const merkle = MerkleBlock.fromRaw(raw);
-    assert.deepStrictEqual(merkle.toRaw(), raw);
-    assert(merkle.verify());
+    const [block1] = merkle300025.getBlock();
+    const raw = block1.toRaw();
+    const block2 = MerkleBlock.fromRaw(raw);
+    assert.bufferEqual(block2.toRaw(), raw);
+    assert(block2.verify());
   });
 
   it('should be jsonified/unjsonified and still verify', () => {
-    const json = mblock.toJSON();
-    const merkle = MerkleBlock.fromJSON(json);
-    assert.deepStrictEqual(merkle.toJSON(), json);
-    assert(merkle.verify());
-  });
-
-  it('should calculate reward properly', () => {
-    let height = 0;
-    let total = 0;
-
-    for (;;) {
-      const reward = consensus.getReward(height, 210000);
-      assert(reward <= consensus.COIN * 50);
-      total += reward;
-      if (reward === 0)
-        break;
-      height++;
-    }
-
-    assert.strictEqual(height, 6930000);
-    assert.strictEqual(total, 2099999997690000);
+    const [block1] = merkle300025.getBlock();
+    const json = block1.toJSON();
+    const block2 = MerkleBlock.fromJSON(json);
+    assert.deepStrictEqual(block2.toJSON(), json);
+    assert(block2.verify());
   });
 
   it('should parse JSON', () => {
-    const block = Block.fromJSON(Block.fromRaw(block300025).toJSON());
-    assert.strictEqual(block.hash('hex'),
+    const [block1] = block300025.getBlock();
+    const block2 = Block.fromJSON(block1.toJSON());
+    assert.strictEqual(block2.hash('hex'),
       '8cc72c02a958de5a8b35a23bb7e3bced8bf840cc0a4e1c820000000000000000');
-    assert.strictEqual(block.rhash(),
+    assert.strictEqual(block2.rhash(),
       '0000000000000000821c4e0acc40f88bedbce3b73ba2358b5ade58a9022cc78c');
-    assert.strictEqual(block.merkleRoot, block.createMerkleRoot('hex'));
+    assert.strictEqual(block2.merkleRoot, block2.createMerkleRoot('hex'));
   });
 
   it('should create a merkle block', () => {
@@ -128,16 +113,15 @@ describe('Block', function() {
     filter.add(item1, 'hex');
     filter.add(item2, 'hex');
 
-    const merkle = MerkleBlock.fromBlock(block, filter);
+    const [block1] = block300025.getBlock();
+    const block2 = MerkleBlock.fromBlock(block1, filter);
 
-    assert(merkle.verifyBody());
-    assert.deepStrictEqual(merkle.toRaw(), mblock.toRaw());
+    assert(block2.verifyBody());
+    assert.bufferEqual(block2.toRaw(), merkle300025.getRaw());
   });
 
   it('should verify a historical block', () => {
-    const block = Block.fromRaw(block300025);
-    const undo = common.parseUndo(undo300025);
-    const view = common.applyUndo(block, undo);
+    const [block, view] = block300025.getBlock();
     const flags = Script.flags.VERIFY_P2SH | Script.flags.VERIFY_DERSIG;
     const height = 300025;
 
@@ -152,13 +136,16 @@ describe('Block', function() {
 
     for (let i = 1; i < block.txs.length; i++) {
       const tx = block.txs[i];
+
       assert(tx.isSane());
       assert(tx.verifyInputs(view, height));
       assert(tx.verify(view, flags));
       assert(!tx.hasWitness());
+
       sigops += tx.getSigopsCost(view, flags);
-      view.addTX(tx, height);
       reward += tx.getFee(view);
+
+      view.addTX(tx, height);
     }
 
     reward += consensus.getReward(height, 210000);
@@ -169,67 +156,70 @@ describe('Block', function() {
   });
 
   it('should fail with a bad merkle root', () => {
-    const block2 = new Block(block);
-    block2.merkleRoot = encoding.NULL_HASH;
-    block2.refresh();
-    assert(!block2.verifyPOW());
-    const [, reason] = block2.checkBody();
+    const [block] = block300025.getBlock();
+    const merkleRoot = block.merkleRoot;
+    block.merkleRoot = encoding.NULL_HASH;
+    block.refresh();
+    assert(!block.verifyPOW());
+    const [, reason] = block.checkBody();
     assert.strictEqual(reason, 'bad-txnmrklroot');
-    assert(!block2.verify());
-    block2.merkleRoot = block.merkleRoot;
-    block2.refresh();
-    assert(block2.verify());
+    assert(!block.verify());
+    block.merkleRoot = merkleRoot;
+    block.refresh();
+    assert(block.verify());
   });
 
   it('should fail on merkle block with a bad merkle root', () => {
-    const mblock2 = new MerkleBlock(mblock);
-    mblock2.merkleRoot = encoding.NULL_HASH;
-    mblock2.refresh();
-    assert(!mblock2.verifyPOW());
-    const [, reason] = mblock2.checkBody();
+    const [block] = merkle300025.getBlock();
+    const merkleRoot = block.merkleRoot;
+    block.merkleRoot = encoding.NULL_HASH;
+    block.refresh();
+    assert(!block.verifyPOW());
+    const [, reason] = block.checkBody();
     assert.strictEqual(reason, 'bad-txnmrklroot');
-    assert(!mblock2.verify());
-    mblock2.merkleRoot = mblock.merkleRoot;
-    mblock2.refresh();
-    assert(mblock2.verify());
+    assert(!block.verify());
+    block.merkleRoot = merkleRoot;
+    block.refresh();
+    assert(block.verify());
   });
 
   it('should fail with a low target', () => {
-    const block2 = new Block(block);
-    block2.bits = 403014710;
-    block2.refresh();
-    assert(!block2.verifyPOW());
-    assert(block2.verifyBody());
-    assert(!block2.verify());
-    block2.bits = block.bits;
-    block2.refresh();
-    assert(block2.verify());
+    const [block] = block300025.getBlock();
+    const bits = block.bits;
+    block.bits = 403014710;
+    block.refresh();
+    assert(!block.verifyPOW());
+    assert(block.verifyBody());
+    assert(!block.verify());
+    block.bits = bits;
+    block.refresh();
+    assert(block.verify());
   });
 
   it('should fail on duplicate txs', () => {
-    const block2 = new Block(block);
-    block2.txs.push(block2.txs[block2.txs.length - 1]);
-    block2.refresh();
-    const [, reason] = block2.checkBody();
+    const [block] = block300025.getBlock();
+    block.txs.push(block.txs[block.txs.length - 1]);
+    block.refresh();
+    const [, reason] = block.checkBody();
     assert.strictEqual(reason, 'bad-txns-duplicate');
   });
 
   it('should verify with headers', () => {
-    const headers = new Headers(block);
+    const headers = block300025.getHeaders();
     assert(headers.verifyPOW());
     assert(headers.verifyBody());
     assert(headers.verify());
   });
 
   it('should handle compact block', () => {
-    const block = Block.fromRaw(block426884);
-    const cblock1 = CompactBlock.fromRaw(compact426884);
+    const [block] = block426884.getBlock();
+    const [cblock1] = compact426884.getBlock();
     const cblock2 = CompactBlock.fromBlock(block, false, cblock1.keyNonce);
 
     assert(cblock1.init());
 
-    assert.deepStrictEqual(cblock1.toRaw(), compact426884);
-    assert.deepStrictEqual(cblock2.toRaw(), compact426884);
+    assert.bufferEqual(cblock1.toRaw(), compact426884.getRaw());
+    assert.bufferEqual(cblock2.toRaw(), compact426884.getRaw());
 
     const map = new Map();
 
@@ -244,18 +234,18 @@ describe('Block', function() {
     for (const tx of cblock1.available)
       assert(tx);
 
-    assert.deepStrictEqual(cblock1.toBlock().toRaw(), block.toRaw());
+    assert.bufferEqual(cblock1.toBlock().toRaw(), block.toRaw());
   });
 
   it('should handle half-full compact block', () => {
-    const block = Block.fromRaw(block426884);
-    const cblock1 = CompactBlock.fromRaw(compact426884);
+    const [block] = block426884.getBlock();
+    const [cblock1] = compact426884.getBlock();
     const cblock2 = CompactBlock.fromBlock(block, false, cblock1.keyNonce);
 
     assert(cblock1.init());
 
-    assert.deepStrictEqual(cblock1.toRaw(), compact426884);
-    assert.deepStrictEqual(cblock2.toRaw(), compact426884);
+    assert.bufferEqual(cblock1.toRaw(), compact426884.getRaw());
+    assert.bufferEqual(cblock2.toRaw(), compact426884.getRaw());
 
     const map = new Map();
 
@@ -267,14 +257,12 @@ describe('Block', function() {
     const full = cblock1.fillMempool(false, { map });
     assert(!full);
 
-    let req = cblock1.toRequest();
+    const rawReq = cblock1.toRequest().toRaw();
+    const req = TXRequest.fromRaw(rawReq);
     assert.strictEqual(req.hash, cblock1.hash('hex'));
 
-    req = TXRequest.fromRaw(req.toRaw());
-    assert.strictEqual(req.hash, cblock1.hash('hex'));
-
-    let res = TXResponse.fromBlock(block, req);
-    res = TXResponse.fromRaw(res.toRaw());
+    const rawRes = TXResponse.fromBlock(block, req).toRaw();
+    const res = TXResponse.fromRaw(rawRes);
 
     const filled = cblock1.fillMissing(res);
     assert(filled);
@@ -282,18 +270,18 @@ describe('Block', function() {
     for (const tx of cblock1.available)
       assert(tx);
 
-    assert.deepStrictEqual(cblock1.toBlock().toRaw(), block.toRaw());
+    assert.bufferEqual(cblock1.toBlock().toRaw(), block.toRaw());
   });
 
   it('should handle compact block', () => {
-    const block = Block.fromRaw(block898352);
-    const cblock1 = CompactBlock.fromRaw(compact898352);
+    const [block] = block898352.getBlock();
+    const [cblock1] = compact898352.getBlock();
     const cblock2 = CompactBlock.fromBlock(block, false, cblock1.keyNonce);
 
     assert(cblock1.init());
 
-    assert.deepStrictEqual(cblock1.toRaw(), compact898352);
-    assert.deepStrictEqual(cblock2.toRaw(), compact898352);
+    assert.bufferEqual(cblock1.toRaw(), compact898352.getRaw());
+    assert.bufferEqual(cblock2.toRaw(), compact898352.getRaw());
 
     assert.strictEqual(cblock1.sid(block.txs[1].hash()), 125673511480291);
 
@@ -310,18 +298,18 @@ describe('Block', function() {
     for (const tx of cblock1.available)
       assert(tx);
 
-    assert.deepStrictEqual(cblock1.toBlock().toRaw(), block.toRaw());
+    assert.bufferEqual(cblock1.toBlock().toRaw(), block.toRaw());
   });
 
   it('should handle half-full compact block', () => {
-    const block = Block.fromRaw(block898352);
-    const cblock1 = CompactBlock.fromRaw(compact898352);
+    const [block] = block898352.getBlock();
+    const [cblock1] = compact898352.getBlock();
     const cblock2 = CompactBlock.fromBlock(block, false, cblock1.keyNonce);
 
     assert(cblock1.init());
 
-    assert.deepStrictEqual(cblock1.toRaw(), compact898352);
-    assert.deepStrictEqual(cblock2.toRaw(), compact898352);
+    assert.bufferEqual(cblock1.toRaw(), compact898352.getRaw());
+    assert.bufferEqual(cblock2.toRaw(), compact898352.getRaw());
 
     assert.strictEqual(cblock1.sid(block.txs[1].hash()), 125673511480291);
 
@@ -335,16 +323,13 @@ describe('Block', function() {
     const full = cblock1.fillMempool(false, { map });
     assert(!full);
 
-    let req = cblock1.toRequest();
+    const rawReq = cblock1.toRequest().toRaw();
+    const req = TXRequest.fromRaw(rawReq);
     assert.strictEqual(req.hash, cblock1.hash('hex'));
     assert.deepStrictEqual(req.indexes, [5, 6, 7, 8, 9]);
 
-    req = TXRequest.fromRaw(req.toRaw());
-    assert.strictEqual(req.hash, cblock1.hash('hex'));
-    assert.deepStrictEqual(req.indexes, [5, 6, 7, 8, 9]);
-
-    let res = TXResponse.fromBlock(block, req);
-    res = TXResponse.fromRaw(res.toRaw());
+    const rawRes = TXResponse.fromBlock(block, req).toRaw();
+    const res = TXResponse.fromRaw(rawRes);
 
     const filled = cblock1.fillMissing(res);
     assert(filled);
@@ -352,48 +337,27 @@ describe('Block', function() {
     for (const tx of cblock1.available)
       assert(tx);
 
-    assert.deepStrictEqual(cblock1.toBlock().toRaw(), block.toRaw());
+    assert.bufferEqual(cblock1.toBlock().toRaw(), block.toRaw());
   });
 
-  it('should count sigops for block 928927 (testnet)', () => {
-    const block = Block.fromRaw(block928927);
-    const undo = common.parseUndo(undo928927);
-    const view = common.applyUndo(block, undo);
-    const flags = Script.flags.VERIFY_P2SH | Script.flags.VERIFY_WITNESS;
+  for (const cache of [false, true]) {
+    const word = cache ? 'with' : 'without';
+    for (const [name, sigops, weight] of sigopsVectors) {
+      const ctx = common.readBlock(name);
+      it(`should count sigops for ${name} (${word} cache)`, () => {
+        const [block, view] = ctx.getBlock();
+        const flags = Script.flags.VERIFY_P2SH | Script.flags.VERIFY_WITNESS;
 
-    let sigops = 0;
-    for (const tx of block.txs)
-      sigops += tx.getSigopsCost(view, flags);
+        if (!cache)
+          block.refresh(true);
 
-    assert.strictEqual(sigops, 10015);
-    assert.strictEqual(block.getWeight(), 3992391);
-  });
+        let count = 0;
+        for (const tx of block.txs)
+          count += tx.getSigopsCost(view, flags);
 
-  it('should count sigops for block 928828 (testnet)', () => {
-    const block = Block.fromRaw(block928828);
-    const undo = common.parseUndo(undo928828);
-    const view = common.applyUndo(block, undo);
-    const flags = Script.flags.VERIFY_P2SH | Script.flags.VERIFY_WITNESS;
-
-    let sigops = 0;
-    for (const tx of block.txs)
-      sigops += tx.getSigopsCost(view, flags);
-
-    assert.strictEqual(sigops, 23236);
-    assert.strictEqual(block.getWeight(), 2481560);
-  });
-
-  it('should count sigops for block 1087400 (testnet)', () => {
-    const block = Block.fromRaw(block1087400);
-    const undo = common.parseUndo(undo1087400);
-    const view = common.applyUndo(block, undo);
-    const flags = Script.flags.VERIFY_P2SH | Script.flags.VERIFY_WITNESS;
-
-    let sigops = 0;
-    for (const tx of block.txs)
-      sigops += tx.getSigopsCost(view, flags);
-
-    assert.strictEqual(sigops, 1298);
-    assert.strictEqual(block.getWeight(), 193331);
-  });
+        assert.strictEqual(count, sigops);
+        assert.strictEqual(block.getWeight(), weight);
+      });
+    }
+  }
 });

@@ -3,16 +3,15 @@
 
 'use strict';
 
-const assert = require('assert');
-const fs = require('../lib/utils/fs');
+const assert = require('./util/assert');
 const GCSFilter = require('../lib/utils/gcs');
 const random = require('../lib/crypto/random');
-const Block = require('../lib/primitives/block');
 const Outpoint = require('../lib/primitives/outpoint');
 const Address = require('../lib/primitives/address');
+const common = require('./util/common');
 
-const raw = fs.readFileSync(`${__dirname}/data/block928927.raw`);
-const block = Block.fromRaw(raw);
+const block928927 = common.readBlock('block928927');
+const [block] = block928927.getBlock();
 
 const key = random.randomBytes(16);
 const P = 20;
@@ -104,16 +103,16 @@ describe('GCS', function() {
     assert.strictEqual(filter1.n, contents1.length);
     assert.strictEqual(filter1.p, filter2.p);
     assert.strictEqual(filter1.n, filter2.n);
-    assert.deepStrictEqual(filter1.data, filter2.data);
+    assert.bufferEqual(filter1.data, filter2.data);
     assert.strictEqual(filter1.p, filter3.p);
     assert.strictEqual(filter1.n, filter3.n);
-    assert.deepStrictEqual(filter1.data, filter3.data);
+    assert.bufferEqual(filter1.data, filter3.data);
     assert.strictEqual(filter1.p, filter4.p);
     assert.strictEqual(filter1.n, filter4.n);
-    assert.deepStrictEqual(filter1.data, filter4.data);
+    assert.bufferEqual(filter1.data, filter4.data);
     assert.strictEqual(filter1.p, filter5.p);
     assert.strictEqual(filter1.n, filter5.n);
-    assert.deepStrictEqual(filter1.data, filter5.data);
+    assert.bufferEqual(filter1.data, filter5.data);
   });
 
   it('should test GCS filter match', () => {
@@ -142,12 +141,12 @@ describe('GCS', function() {
     match = filter2.matchAny(key, contents2);
     assert(!match);
 
-    const c = contents2.slice();
-    c.push(Buffer.from('Nate'));
+    const contents = contents2.slice();
+    contents.push(Buffer.from('Nate'));
 
-    match = filter1.matchAny(key, c);
+    match = filter1.matchAny(key, contents);
     assert(match);
-    match = filter2.matchAny(key, c);
+    match = filter2.matchAny(key, contents);
     assert(match);
   });
 

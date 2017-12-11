@@ -3,31 +3,38 @@
 
 'use strict';
 
-const assert = require('assert');
-const BN = require('../lib/crypto/bn');
+const assert = require('./util/assert');
 const consensus = require('../lib/protocol/consensus');
 const encoding = require('../lib/utils/encoding');
 const Coin = require('../lib/primitives/coin');
 const Script = require('../lib/script/script');
 const Chain = require('../lib/blockchain/chain');
+const WorkerPool = require('../lib/workers/workerpool');
 const Miner = require('../lib/mining/miner');
 const MTX = require('../lib/primitives/mtx');
 const MemWallet = require('./util/memwallet');
 const Network = require('../lib/protocol/network');
 const Output = require('../lib/primitives/output');
 const common = require('../lib/blockchain/common');
+const Opcode = require('../lib/script/opcode');
 const opcodes = Script.opcodes;
 
 const network = Network.get('regtest');
 
+const workers = new WorkerPool({
+  enabled: true
+});
+
 const chain = new Chain({
   db: 'memory',
-  network
+  network,
+  workers
 });
 
 const miner = new Miner({
   chain,
-  version: 4
+  version: 4,
+  workers
 });
 
 const cpu = miner.cpu;
@@ -72,8 +79,8 @@ async function mineCSV(fund) {
 
   spend.addOutput({
     script: [
-      Script.array(new BN(1)),
-      Script.opcodes.OP_CHECKSEQUENCEVERIFY
+      Opcode.fromInt(1),
+      Opcode.fromSymbol('checksequenceverify')
     ],
     value: 10000
   });
@@ -151,13 +158,13 @@ describe('Chain', function() {
 
       assert.strictEqual(chain.tip.hash, hash1);
 
-      tip1 = await chain.db.getEntry(hash1);
-      tip2 = await chain.db.getEntry(hash2);
+      tip1 = await chain.getEntry(hash1);
+      tip2 = await chain.getEntry(hash2);
 
       assert(tip1);
       assert(tip2);
 
-      assert(!await tip2.isMainChain());
+      assert(!await chain.isMainChain(tip2));
     }
   });
 
@@ -174,7 +181,7 @@ describe('Chain', function() {
   it('should handle a reorg', async () => {
     assert.strictEqual(chain.height, 210);
 
-    const entry = await chain.db.getEntry(tip2.hash);
+    const entry = await chain.getEntry(tip2.hash);
     assert(entry);
     assert.strictEqual(chain.height, entry.height);
 
@@ -190,7 +197,7 @@ describe('Chain', function() {
 
     assert(forked);
     assert.strictEqual(chain.tip.hash, block.hash('hex'));
-    assert(chain.tip.chainwork.cmp(tip1.chainwork) > 0);
+    assert(chain.tip.chainwork.gt(tip1.chainwork));
   });
 
   it('should have correct chain value', () => {
@@ -204,7 +211,7 @@ describe('Chain', function() {
   });
 
   it('should check main chain', async () => {
-    const result = await tip1.isMainChain();
+    const result = await chain.isMainChain(tip1);
     assert(!result);
   });
 
@@ -214,12 +221,12 @@ describe('Chain', function() {
     assert(await chain.add(block));
 
     const hash = block.hash('hex');
-    const entry = await chain.db.getEntry(hash);
+    const entry = await chain.getEntry(hash);
 
     assert(entry);
     assert.strictEqual(chain.tip.hash, entry.hash);
 
-    const result = await entry.isMainChain();
+    const result = await chain.isMainChain(entry);
     assert(result);
   });
 
@@ -257,7 +264,7 @@ describe('Chain', function() {
   });
 
   it('should fail to connect coins on an alternate chain', async () => {
-    const block = await chain.db.getBlock(tip1.hash);
+    const block = await chain.getBlock(tip1.hash);
     const cb = block.txs[0];
     const mtx = new MTX();
 
@@ -307,9 +314,9 @@ describe('Chain', function() {
     const tx = block.txs[1];
     const output = Coin.fromTX(tx, 2, chain.height);
 
-    const coin = await chain.db.getCoin(tx.hash('hex'), 2);
+    const coin = await chain.getCoin(tx.hash('hex'), 2);
 
-    assert.deepStrictEqual(coin.toRaw(), output.toRaw());
+    assert.bufferEqual(coin.toRaw(), output.toRaw());
   });
 
   it('should have correct wallet balance', async () => {
@@ -340,7 +347,7 @@ describe('Chain', function() {
   it('should rescan for transactions', async () => {
     let total = 0;
 
-    await chain.db.scan(0, wallet.filter, async (block, txs) => {
+    await chain.scan(0, wallet.filter, async (block, txs) => {
       total += txs.length;
     });
 
@@ -354,7 +361,7 @@ describe('Chain', function() {
 
     assert.strictEqual(chain.height, 214);
 
-    const prev = await chain.tip.getPrevious();
+    const prev = await chain.getPrevious(chain.tip);
     const state = await chain.getState(prev, deployments.csv);
     assert.strictEqual(state, 1);
 
@@ -363,19 +370,19 @@ describe('Chain', function() {
       assert(await chain.add(block));
       switch (chain.height) {
         case 288: {
-          const prev = await chain.tip.getPrevious();
+          const prev = await chain.getPrevious(chain.tip);
           const state = await chain.getState(prev, deployments.csv);
           assert.strictEqual(state, 1);
           break;
         }
         case 432: {
-          const prev = await chain.tip.getPrevious();
+          const prev = await chain.getPrevious(chain.tip);
           const state = await chain.getState(prev, deployments.csv);
           assert.strictEqual(state, 2);
           break;
         }
         case 576: {
-          const prev = await chain.tip.getPrevious();
+          const prev = await chain.getPrevious(chain.tip);
           const state = await chain.getState(prev, deployments.csv);
           assert.strictEqual(state, 3);
           break;
@@ -395,13 +402,13 @@ describe('Chain', function() {
 
   it('should have activated segwit', async () => {
     const deployments = network.deployments;
-    const prev = await chain.tip.getPrevious();
+    const prev = await chain.getPrevious(chain.tip);
     const state = await chain.getState(prev, deployments.segwit);
     assert.strictEqual(state, 3);
   });
 
   it('should test csv', async () => {
-    const tx = (await chain.db.getBlock(chain.height - 100)).txs[0];
+    const tx = (await chain.getBlock(chain.height - 100)).txs[0];
     const csvBlock = await mineCSV(tx);
 
     assert(await chain.add(csvBlock));
@@ -412,8 +419,8 @@ describe('Chain', function() {
 
     spend.addOutput({
       script: [
-        Script.array(new BN(2)),
-        Script.opcodes.OP_CHECKSEQUENCEVERIFY
+        Opcode.fromInt(2),
+        Opcode.fromSymbol('checksequenceverify')
       ],
       value: 10000
     });
@@ -432,13 +439,13 @@ describe('Chain', function() {
   });
 
   it('should fail csv with bad sequence', async () => {
-    const csv = (await chain.db.getBlock(chain.height - 100)).txs[0];
+    const csv = (await chain.getBlock(chain.height - 100)).txs[0];
     const spend = new MTX();
 
     spend.addOutput({
       script: [
-        Script.array(new BN(1)),
-        Script.opcodes.OP_CHECKSEQUENCEVERIFY
+        Opcode.fromInt(1),
+        Opcode.fromSymbol('checksequenceverify')
       ],
       value: 1 * 1e8
     });
@@ -461,7 +468,7 @@ describe('Chain', function() {
   });
 
   it('should fail csv lock checks', async () => {
-    const tx = (await chain.db.getBlock(chain.height - 100)).txs[0];
+    const tx = (await chain.getBlock(chain.height - 100)).txs[0];
     const csvBlock = await mineCSV(tx);
 
     assert(await chain.add(csvBlock));
@@ -472,8 +479,8 @@ describe('Chain', function() {
 
     spend.addOutput({
       script: [
-        Script.array(new BN(2)),
-        Script.opcodes.OP_CHECKSEQUENCEVERIFY
+        Opcode.fromInt(2),
+        Opcode.fromSymbol('checksequenceverify')
       ],
       value: 1 * 1e8
     });
@@ -499,7 +506,7 @@ describe('Chain', function() {
   });
 
   it('should fail to connect bad MTP', async () => {
-    const mtp = await chain.tip.getMedianTime();
+    const mtp = await chain.getMedianTime(chain.tip);
     const job = await cpu.createJob();
     job.attempt.time = mtp - 1;
     assert.strictEqual(await mineBlock(job), 'time-too-old');
@@ -540,7 +547,6 @@ describe('Chain', function() {
     const tx = block.txs[0];
     const input = tx.inputs[0];
     input.witness.set(0, Buffer.allocUnsafe(33));
-    input.witness.compile();
     block.refresh(true);
     assert.strictEqual(await addBlock(block), 'bad-witness-nonce-size');
   });
@@ -550,7 +556,6 @@ describe('Chain', function() {
     const tx = block.txs[0];
     const input = tx.inputs[0];
     input.witness.set(0, encoding.ONE_HASH);
-    input.witness.compile();
     block.refresh(true);
     assert.strictEqual(await addBlock(block), 'bad-witness-merkle-match');
   });
@@ -563,9 +568,9 @@ describe('Chain', function() {
 
     assert(output.script.isCommitment());
 
-    const commit = Buffer.from(output.script.get(1));
+    const commit = Buffer.from(output.script.getData(1));
     commit.fill(0, 10);
-    output.script.set(1, commit);
+    output.script.setData(1, commit);
     output.script.compile();
 
     block.refresh(true);
@@ -608,7 +613,7 @@ describe('Chain', function() {
   });
 
   it('should mine a witness tx', async () => {
-    const prev = await chain.db.getBlock(chain.height - 2000);
+    const prev = await chain.getBlock(chain.height - 2000);
     const cb = prev.txs[0];
     const mtx = new MTX();
 
@@ -632,7 +637,7 @@ describe('Chain', function() {
     const job = await cpu.createJob();
 
     for (let i = start; i <= end; i++) {
-      const block = await chain.db.getBlock(i);
+      const block = await chain.getBlock(i);
       const cb = block.txs[0];
 
       const mtx = new MTX();
@@ -657,7 +662,7 @@ describe('Chain', function() {
     const job = await cpu.createJob();
 
     for (let i = start; i <= end; i++) {
-      const block = await chain.db.getBlock(i);
+      const block = await chain.getBlock(i);
       const cb = block.txs[0];
 
       const mtx = new MTX();
@@ -682,7 +687,7 @@ describe('Chain', function() {
     const job = await cpu.createJob();
 
     for (let i = start; i <= end; i++) {
-      const block = await chain.db.getBlock(i);
+      const block = await chain.getBlock(i);
       const cb = block.txs[0];
 
       const mtx = new MTX();
@@ -719,7 +724,7 @@ describe('Chain', function() {
 
   it('should fail to connect premature cb spend', async () => {
     const job = await cpu.createJob();
-    const block = await chain.db.getBlock(chain.height - 98);
+    const block = await chain.getBlock(chain.height - 98);
     const cb = block.txs[0];
     const mtx = new MTX();
 
@@ -737,7 +742,7 @@ describe('Chain', function() {
 
   it('should fail to connect vout belowout', async () => {
     const job = await cpu.createJob();
-    const block = await chain.db.getBlock(chain.height - 99);
+    const block = await chain.getBlock(chain.height - 99);
     const cb = block.txs[0];
     const mtx = new MTX();
 
@@ -755,7 +760,7 @@ describe('Chain', function() {
 
   it('should fail to connect outtotal toolarge', async () => {
     const job = await cpu.createJob();
-    const block = await chain.db.getBlock(chain.height - 99);
+    const block = await chain.getBlock(chain.height - 99);
     const cb = block.txs[0];
     const mtx = new MTX();
 
@@ -780,13 +785,14 @@ describe('Chain', function() {
     const flags = common.flags.DEFAULT_FLAGS & ~common.flags.VERIFY_POW;
 
     const redeem = new Script();
-    redeem.push(new BN(20));
+    redeem.pushInt(20);
 
     for (let i = 0; i < 20; i++)
-      redeem.push(encoding.ZERO_KEY);
+      redeem.pushData(encoding.ZERO_KEY);
 
-    redeem.push(new BN(20));
-    redeem.push(opcodes.OP_CHECKMULTISIG);
+    redeem.pushInt(20);
+    redeem.pushOp(opcodes.OP_CHECKMULTISIG);
+
     redeem.compile();
 
     const script = Script.fromScripthash(redeem.hash160());
@@ -821,17 +827,19 @@ describe('Chain', function() {
     const job = await cpu.createJob();
 
     const script = new Script();
-    script.push(new BN(20));
+
+    script.pushInt(20);
 
     for (let i = 0; i < 20; i++)
-      script.push(encoding.ZERO_KEY);
+      script.pushData(encoding.ZERO_KEY);
 
-    script.push(new BN(20));
-    script.push(opcodes.OP_CHECKMULTISIG);
+    script.pushInt(20);
+    script.pushOp(opcodes.OP_CHECKMULTISIG);
+
     script.compile();
 
     for (let i = start; i <= end; i++) {
-      const block = await chain.db.getBlock(i);
+      const block = await chain.getBlock(i);
       const cb = block.txs[0];
 
       if (cb.outputs.length === 2)
@@ -841,7 +849,7 @@ describe('Chain', function() {
 
       for (let j = 2; j < cb.outputs.length; j++) {
         mtx.addTX(cb, j);
-        mtx.inputs[j - 2].script = new Script([script.toRaw()]);
+        mtx.inputs[j - 2].script.fromItems([script.toRaw()]);
       }
 
       mtx.addOutput(witWallet.getAddress(), 1);

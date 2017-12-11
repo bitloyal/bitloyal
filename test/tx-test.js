@@ -3,55 +3,63 @@
 
 'use strict';
 
-const assert = require('assert');
+const assert = require('./util/assert');
 const util = require('../lib/utils/util');
 const encoding = require('../lib/utils/encoding');
 const random = require('../lib/crypto/random');
 const consensus = require('../lib/protocol/consensus');
 const TX = require('../lib/primitives/tx');
-const Coin = require('../lib/primitives/coin');
 const Output = require('../lib/primitives/output');
 const Outpoint = require('../lib/primitives/outpoint');
 const Script = require('../lib/script/script');
 const Witness = require('../lib/script/witness');
+const Opcode = require('../lib/script/opcode');
 const Input = require('../lib/primitives/input');
 const CoinView = require('../lib/coins/coinview');
 const KeyRing = require('../lib/primitives/keyring');
 const common = require('./util/common');
-const opcodes = Script.opcodes;
 
 const validTests = require('./data/tx-valid.json');
 const invalidTests = require('./data/tx-invalid.json');
 const sighashTests = require('./data/sighash-tests.json');
 
-const tx1 = common.parseTX('data/tx1.hex');
-const tx2 = common.parseTX('data/tx2.hex');
-const tx3 = common.parseTX('data/tx3.hex');
-const tx4 = common.parseTX('data/tx4.hex');
-const tx5 = common.parseTX('data/tx5.hex');
-const tx6 = common.parseTX('data/tx6.hex');
-const tx7 = common.parseTX('data/tx7.hex');
+const tx1 = common.readTX('tx1');
+const tx2 = common.readTX('tx2');
+const tx3 = common.readTX('tx3');
+const tx4 = common.readTX('tx4');
+const tx5 = common.readTX('tx5');
+const tx6 = common.readTX('tx6');
+const tx7 = common.readTX('tx7');
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
 const MAX_SAFE_ADDITION = 0xfffffffffffff;
 
 function clearCache(tx, noCache) {
-  if (!noCache) {
-    assert.strictEqual(tx.hash('hex'), tx.clone().hash('hex'));
+  if (noCache) {
+    tx.refresh();
     return;
   }
-  tx.refresh();
+
+  const copy = tx.clone();
+
+  assert.bufferEqual(tx.hash(), copy.hash());
+  assert.bufferEqual(tx.witnessHash(), copy.witnessHash());
 }
 
 function parseTXTest(data) {
-  const [coins, hex, names] = data;
+  const coins = data[0];
+  const hex = data[1];
+  const names = data[2] || 'NONE';
 
   let flags = 0;
 
-  for (const name of (names || '').trim().split(/,\s*/)) {
-    const flag = `VERIFY_${name}`;
-    assert(Script.flags[flag] != null, 'Unknown flag.');
-    flags |= Script.flags[flag];
+  for (const name of names.split(',')) {
+    const flag = Script.flags[`VERIFY_${name}`];
+
+    if (flag == null)
+      throw new Error(`Unknown flag: ${name}.`);
+
+    flags |= flag;
   }
 
   const view = new CoinView();
@@ -61,20 +69,15 @@ function parseTXTest(data) {
     const script = Script.fromString(str);
     const value = parseInt(amount || '0', 10);
 
-    if (index === -1)
+    // Ignore the coinbase tests.
+    // They should all fail.
+    if ((index >>> 0) === 0xffffffff)
       continue;
 
-    const coin = new Coin({
-      version: 1,
-      height: -1,
-      coinbase: false,
-      hash: hash,
-      index: index,
-      script: script,
-      value: value
-    });
+    const prevout = new Outpoint(hash, index);
+    const output = new Output({script, value});
 
-    view.addCoin(coin);
+    view.addOutput(prevout, output);
   }
 
   const raw = Buffer.from(hex, 'hex');
@@ -195,25 +198,25 @@ describe('TX', function() {
     const suffix = noCache ? 'without cache' : 'with cache';
 
     it(`should verify non-minimal output ${suffix}`, () => {
-      const {tx, view} = tx1;
+      const [tx, view] = tx1.getTX();
       clearCache(tx, noCache);
       assert(tx.verify(view, Script.flags.VERIFY_P2SH));
     });
 
     it(`should verify tx.version == 0 ${suffix}`, () => {
-      const {tx, view} = tx2;
+      const [tx, view] = tx2.getTX();
       clearCache(tx, noCache);
       assert(tx.verify(view, Script.flags.VERIFY_P2SH));
     });
 
     it(`should verify sighash_single bug w/ findanddelete ${suffix}`, () => {
-      const {tx, view} = tx3;
+      const [tx, view] = tx3.getTX();
       clearCache(tx, noCache);
       assert(tx.verify(view, Script.flags.VERIFY_P2SH));
     });
 
     it(`should verify high S value with only DERSIG enabled ${suffix}`, () => {
-      const {tx, view} = tx4;
+      const [tx, view] = tx4.getTX();
       const coin = view.getOutputFor(tx.inputs[0]);
       const flags = Script.flags.VERIFY_P2SH | Script.flags.VERIFY_DERSIG;
       clearCache(tx, noCache);
@@ -221,13 +224,13 @@ describe('TX', function() {
     });
 
     it(`should parse witness tx properly ${suffix}`, () => {
-      const {tx} = tx5;
+      const [tx] = tx5.getTX();
       clearCache(tx, noCache);
 
       assert.strictEqual(tx.inputs.length, 5);
       assert.strictEqual(tx.outputs.length, 1980);
       assert(tx.hasWitness());
-      assert.notStrictEqual(tx.hash('hex'), tx.witnessHash('hex'));
+      assert.notStrictEqual(tx.txid(), tx.wtxid());
       assert.strictEqual(tx.witnessHash('hex'),
         '088c919cd8408005f255c411f786928385688a9e8fdb2db4c9bc3578ce8c94cf');
       assert.strictEqual(tx.getSize(), 62138);
@@ -235,26 +238,27 @@ describe('TX', function() {
       assert.strictEqual(tx.getWeight(), 247250);
 
       const raw1 = tx.toRaw();
-      clearCache(tx, true);
+      tx.refresh();
 
       const raw2 = tx.toRaw();
-      assert.deepStrictEqual(raw1, raw2);
+      assert.bufferEqual(raw1, raw2);
 
       const tx2 = TX.fromRaw(raw2);
       clearCache(tx2, noCache);
 
-      assert.strictEqual(tx.hash('hex'), tx2.hash('hex'));
-      assert.strictEqual(tx.witnessHash('hex'), tx2.witnessHash('hex'));
+      assert.strictEqual(tx.txid(), tx2.txid());
+      assert.strictEqual(tx.wtxid(), tx2.wtxid());
+      assert.notStrictEqual(tx.txid(), tx2.wtxid());
     });
 
     it(`should verify the coolest tx ever sent ${suffix}`, () => {
-      const {tx, view} = tx6;
+      const [tx, view] = tx6.getTX();
       clearCache(tx, noCache);
       assert(tx.verify(view, Script.flags.VERIFY_NONE));
     });
 
     it(`should verify a historical transaction ${suffix}`, () => {
-      const {tx, view} = tx7;
+      const [tx, view] = tx7.getTX();
       clearCache(tx, noCache);
       assert(tx.verify(view));
     });
@@ -547,15 +551,15 @@ describe('TX', function() {
     assert.ok(!tx.verifyInputs(view, 0));
   });
 
-  [MAX_SAFE_ADDITION, MAX_SAFE_INTEGER].forEach((MAX) => {
+  for (const value of [MAX_SAFE_ADDITION, MAX_SAFE_INTEGER]) {
     it('should fail on >53 bit values from multiple', () => {
       const view = new CoinView();
       const tx = new TX({
         version: 1,
         inputs: [
-          createInput(MAX, view)[0],
-          createInput(MAX, view)[0],
-          createInput(MAX, view)[0]
+          createInput(value, view)[0],
+          createInput(value, view)[0],
+          createInput(value, view)[0]
         ],
         outputs: [{
           script: [],
@@ -575,15 +579,15 @@ describe('TX', function() {
         outputs: [
           {
             script: [],
-            value: MAX
+            value: value
           },
           {
             script: [],
-            value: MAX
+            value: value
           },
           {
             script: [],
-            value: MAX
+            value: value
           }
         ],
         locktime: 0
@@ -597,9 +601,9 @@ describe('TX', function() {
       const tx = new TX({
         version: 1,
         inputs: [
-          createInput(MAX, view)[0],
-          createInput(MAX, view)[0],
-          createInput(MAX, view)[0]
+          createInput(value, view)[0],
+          createInput(value, view)[0],
+          createInput(value, view)[0]
         ],
         outputs: [{
           script: [],
@@ -610,7 +614,7 @@ describe('TX', function() {
       assert.ok(tx.isSane());
       assert.ok(!tx.verifyInputs(view, 0));
     });
-  });
+  }
 
   it('should count sigops for multisig', () => {
     const flags = Script.flags.VERIFY_WITNESS | Script.flags.VERIFY_P2SH;
@@ -620,8 +624,8 @@ describe('TX', function() {
     const output = Script.fromMultisig(1, 2, [pub, pub]);
 
     const input = new Script([
-      opcodes.OP_0,
-      opcodes.OP_0
+      Opcode.fromInt(0),
+      Opcode.fromInt(0)
     ]);
 
     const witness = new Witness();
@@ -642,9 +646,9 @@ describe('TX', function() {
     const output = Script.fromScripthash(redeem.hash160());
 
     const input = new Script([
-      opcodes.OP_0,
-      opcodes.OP_0,
-      redeem.toRaw()
+      Opcode.fromInt(0),
+      Opcode.fromInt(0),
+      Opcode.fromData(redeem.toRaw())
     ]);
 
     const witness = new Witness();
@@ -703,7 +707,7 @@ describe('TX', function() {
     const output = Script.fromScripthash(redeem.hash160());
 
     const input = new Script([
-      redeem.toRaw()
+      Opcode.fromData(redeem.toRaw())
     ]);
 
     const witness = new Witness([
@@ -750,7 +754,7 @@ describe('TX', function() {
     const output = Script.fromScripthash(redeem.hash160());
 
     const input = new Script([
-      redeem.toRaw()
+      Opcode.fromData(redeem.toRaw())
     ]);
 
     const witness = new Witness([
